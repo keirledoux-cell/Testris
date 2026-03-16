@@ -309,8 +309,8 @@
       <!-- OVERLAY START / GAME OVER -->
       <div id="overlay">
         <div id="overlay-title">TETRIS</div>
-        <div id="overlay-sub" id="overlay-sub">Prêt à jouer ?</div>
-        <button class="btn btn-primary" id="start-btn">▶ DÉMARRER</button>
+        <div id="overlay-sub">Prêt à jouer ?</div>
+        <button class="btn btn-primary" id="start-btn" onclick="startGame()">▶ DÉMARRER</button>
       </div>
     </div>
 
@@ -654,4 +654,402 @@
   function hardDrop() {
     while (isValid(currentPiece.matrix, currentPiece.x, currentPiece.y + 1)) {
       currentPiece.y++;
-      score += 2; // Bonus de points pour le
+      score += 2; // Bonus de points pour le hard drop
+    }
+    drop();
+  }
+
+  /**
+   * Verrouille la pièce sur la grille.
+   * On copie chaque cellule de la pièce dans board[][].
+   */
+  function lockPiece() {
+    currentPiece.matrix.forEach((row, r) => {
+      row.forEach((val, c) => {
+        if (!val) return;
+        const ny = currentPiece.y + r;
+        const nx = currentPiece.x + c;
+        if (ny >= 0) board[ny][nx] = currentPiece.color;
+      });
+    });
+  }
+
+  /**
+   * Détecte et supprime les lignes complètes.
+   * Une ligne est complète si toutes ses cellules sont non-nulles.
+   * On utilise Array.every() pour tester chaque cellule.
+   */
+  function clearLines() {
+    let count = 0;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (board[r].every(cell => cell !== null)) {
+        board.splice(r, 1);                    // Supprime la ligne
+        board.unshift(Array(COLS).fill(null)); // Ajoute une ligne vide en haut
+        r++;   // On re-teste la même ligne (qui est maintenant différente)
+        count++;
+      }
+    }
+    if (count > 0) {
+      // Ajout des points selon le barème, multiplié par le niveau
+      score += (SCORE_TABLE[count] || 0) * level;
+      lines += count;
+      // Le niveau monte tous les 10 lignes (affichage)
+      level = Math.floor(lines / 10) + 1;
+      updateHUD();
+      // Flash visuel sur le compteur de lignes pour signaler l'accélération
+      flashSpeed();
+    }
+  }
+
+  /**
+   * Fait apparaître une nouvelle pièce.
+   * Si la nouvelle pièce est invalide dès son apparition → Game Over.
+   */
+  function spawnPiece() {
+    currentPiece = nextPiece || randomPiece();
+    nextPiece    = randomPiece();
+    drawNext();
+
+    // Vérification de Game Over
+    if (!isValid(currentPiece.matrix, currentPiece.x, currentPiece.y)) {
+      endGame();
+    }
+  }
+
+  /**
+   * Programme la prochaine descente automatique.
+   * On utilise clearTimeout pour annuler le timer précédent,
+   * évitant les doublons si le joueur accélère manuellement.
+   */
+  function scheduleNext() {
+    clearTimeout(dropTimer);
+    dropTimer = setTimeout(drop, getSpeed());
+  }
+
+  // ================================================
+  // 7. RENDU GRAPHIQUE
+  // On dessine tout sur le canvas à chaque frame.
+  // ================================================
+
+  /**
+   * Dessine une cellule colorée avec un effet de relief.
+   * @param {CanvasRenderingContext2D} context - le canvas cible
+   * @param {number} x - colonne
+   * @param {number} y - ligne
+   * @param {string} color - couleur CSS
+   * @param {number} size - taille en pixels
+   */
+  function drawCell(context, x, y, color, size = CELL) {
+    const px = x * size;
+    const py = y * size;
+    const pad = 1;
+
+    // Fond de la cellule
+    context.fillStyle = color;
+    context.fillRect(px + pad, py + pad, size - pad * 2, size - pad * 2);
+
+    // Reflet haut/gauche (clair)
+    context.fillStyle = 'rgba(255,255,255,0.2)';
+    context.fillRect(px + pad, py + pad, size - pad * 2, 3);
+    context.fillRect(px + pad, py + pad, 3, size - pad * 2);
+
+    // Ombre bas/droite (sombre)
+    context.fillStyle = 'rgba(0,0,0,0.3)';
+    context.fillRect(px + pad, py + size - pad - 3, size - pad * 2, 3);
+    context.fillRect(px + size - pad - 3, py + pad, 3, size - pad * 2);
+  }
+
+  /**
+   * Calcule la position Y du "ghost" (fantôme) :
+   * la position la plus basse où la pièce peut tomber.
+   * Utile pour aider le joueur à viser.
+   */
+  function getGhostY() {
+    let gy = currentPiece.y;
+    while (isValid(currentPiece.matrix, currentPiece.x, gy + 1)) gy++;
+    return gy;
+  }
+
+  /**
+   * Fonction principale de rendu.
+   * Appelée à chaque mouvement ou descente de pièce.
+   */
+  function render() {
+    // Efface tout le canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // --- Fond de la grille ---
+    ctx.fillStyle = getComputedStyle(document.documentElement)
+                      .getPropertyValue('--cell-empty').trim();
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // --- Lignes de grille (décoratives) ---
+    ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+    ctx.lineWidth = 1;
+    for (let c = 0; c <= COLS; c++) {
+      ctx.beginPath();
+      ctx.moveTo(c * CELL, 0);
+      ctx.lineTo(c * CELL, canvas.height);
+      ctx.stroke();
+    }
+    for (let r = 0; r <= ROWS; r++) {
+      ctx.beginPath();
+      ctx.moveTo(0, r * CELL);
+      ctx.lineTo(canvas.width, r * CELL);
+      ctx.stroke();
+    }
+
+    // --- Cellules verrouillées sur la grille ---
+    board.forEach((row, r) => {
+      row.forEach((color, c) => {
+        if (color) drawCell(ctx, c, r, color);
+      });
+    });
+
+    // --- Ghost piece (fantôme semi-transparent) ---
+    if (gameRunning && !paused) {
+      const gy = getGhostY();
+      currentPiece.matrix.forEach((row, r) => {
+        row.forEach((val, c) => {
+          if (!val) return;
+          const px = (currentPiece.x + c) * CELL;
+          const py = (gy + r) * CELL;
+          ctx.strokeStyle = currentPiece.color;
+          ctx.lineWidth = 1;
+          ctx.globalAlpha = 0.25;
+          ctx.strokeRect(px + 2, py + 2, CELL - 4, CELL - 4);
+          ctx.globalAlpha = 1;
+        });
+      });
+    }
+
+    // --- Pièce courante ---
+    if (gameRunning) {
+      currentPiece.matrix.forEach((row, r) => {
+        row.forEach((val, c) => {
+          if (val) drawCell(ctx, currentPiece.x + c, currentPiece.y + r, currentPiece.color);
+        });
+      });
+    }
+  }
+
+  /**
+   * Dessine la prochaine pièce dans le petit canvas de prévisualisation.
+   */
+  function drawNext() {
+    const size = 22;
+    nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+    nextCtx.fillStyle = getComputedStyle(document.documentElement)
+                          .getPropertyValue('--cell-empty').trim();
+    nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+
+    const m = nextPiece.matrix;
+    // Centrage de la pièce dans le canvas de prévisualisation
+    const offsetX = Math.floor((nextCanvas.width  / size - m[0].length) / 2);
+    const offsetY = Math.floor((nextCanvas.height / size - m.length)    / 2);
+
+    m.forEach((row, r) => {
+      row.forEach((val, c) => {
+        if (val) drawCell(nextCtx, offsetX + c, offsetY + r, nextPiece.color, size);
+      });
+    });
+  }
+
+  /**
+   * Met à jour l'affichage du score, niveau et lignes.
+   */
+  function updateHUD() {
+    scoreEl.textContent = score;
+    levelEl.textContent = level;
+    linesEl.textContent = lines;
+  }
+
+  /**
+   * Animation flash sur le panneau de score pour signaler
+   * visuellement que la vitesse vient d'augmenter.
+   */
+  function flashSpeed() {
+    [scoreEl, linesEl, levelEl].forEach(el => {
+      el.style.transition = 'color 0s';
+      el.style.color = '#ff9100';
+      setTimeout(() => {
+        el.style.transition = 'color 0.5s';
+        el.style.color = '';
+      }, 180);
+    });
+  }
+
+  // ================================================
+  // 8. GESTION DES ÉTATS DE JEU (start, pause, fin)
+  // ================================================
+
+  /**
+   * Démarre une nouvelle partie.
+   */
+  function startGame() {
+    board        = createBoard();
+    score        = 0;
+    lines        = 0;
+    level        = 1;
+    gameRunning  = true;
+    paused       = false;
+    nextPiece    = randomPiece();
+    spawnPiece();
+    updateHUD();
+    overlay.classList.add('hidden');
+    pauseBtn.textContent = 'PAUSE';
+    render();
+    scheduleNext();
+    // Donner le focus au canvas pour que les touches clavier fonctionnent immédiatement
+    canvas.focus();
+  }
+
+  /**
+   * Termine la partie (Game Over).
+   */
+  function endGame() {
+    gameRunning = false;
+    clearTimeout(dropTimer);
+    saveBest();
+    oTitle.textContent = 'GAME OVER';
+    oSub.textContent   = `Score : ${score}`;
+    startBtn.textContent = '↺ REJOUER';
+    overlay.classList.remove('hidden');
+  }
+
+  /**
+   * Bascule la pause.
+   */
+  function togglePause() {
+    if (!gameRunning) return;
+    paused = !paused;
+    pauseBtn.textContent = paused ? 'REPRENDRE' : 'PAUSE';
+    if (paused) {
+      clearTimeout(dropTimer);
+    } else {
+      scheduleNext();
+    }
+  }
+
+  // ================================================
+  // 9. GESTION DES ÉVÉNEMENTS (clavier + boutons)
+  // ================================================
+
+  /**
+   * Écoute les touches du clavier sur le DOCUMENT entier.
+   * On bloque le scroll de page pour les flèches et l'espace
+   * avec e.preventDefault() — sinon la page défile au lieu
+   * de contrôler le jeu.
+   */
+  const HANDLED_KEYS = new Set(['ArrowLeft','ArrowRight','ArrowDown','ArrowUp',' ','p','P']);
+
+  document.addEventListener('keydown', e => {
+    // Empêcher le scroll de la page pour toutes les touches de jeu
+    if (HANDLED_KEYS.has(e.key)) e.preventDefault();
+
+    if (!gameRunning || paused) return;
+
+    switch (e.key) {
+      case 'ArrowLeft':
+        if (isValid(currentPiece.matrix, currentPiece.x - 1, currentPiece.y))
+          currentPiece.x--;
+        break;
+
+      case 'ArrowRight':
+        if (isValid(currentPiece.matrix, currentPiece.x + 1, currentPiece.y))
+          currentPiece.x++;
+        break;
+
+      case 'ArrowDown':
+        drop();
+        return;
+
+      case 'ArrowUp':
+        rotatePiece();
+        break;
+
+      case ' ':
+        hardDrop();
+        return;
+
+      case 'p':
+      case 'P':
+        togglePause();
+        return;
+
+      default: return;
+    }
+
+    render();
+  });
+
+  // Cliquer sur le canvas lui donne le focus clavier
+  canvas.addEventListener('click', () => canvas.focus());
+
+  // ------------------------------------------------
+  // BOUTONS TACTILES — fonctionnent aussi à la souris
+  // ------------------------------------------------
+  function touchAction(action) {
+    if (!gameRunning || paused) return;
+    action();
+    render();
+  }
+
+  document.getElementById('btn-left').addEventListener('click', () =>
+    touchAction(() => {
+      if (isValid(currentPiece.matrix, currentPiece.x - 1, currentPiece.y))
+        currentPiece.x--;
+    })
+  );
+
+  document.getElementById('btn-right').addEventListener('click', () =>
+    touchAction(() => {
+      if (isValid(currentPiece.matrix, currentPiece.x + 1, currentPiece.y))
+        currentPiece.x++;
+    })
+  );
+
+  document.getElementById('btn-rotate').addEventListener('click', () =>
+    touchAction(() => rotatePiece())
+  );
+
+  document.getElementById('btn-down').addEventListener('click', () => {
+    if (!gameRunning || paused) return;
+    drop(); // drop() appelle render() lui-même
+  });
+
+  document.getElementById('touch-drop').addEventListener('click', () => {
+    if (!gameRunning || paused) return;
+    hardDrop();
+  });
+
+  // Bouton Start / Rejouer
+  startBtn.addEventListener('click', startGame);
+
+  // Bouton Pause
+  pauseBtn.addEventListener('click', togglePause);
+
+  // Bouton Reset
+  restartBtn.addEventListener('click', () => {
+    clearTimeout(dropTimer);
+    gameRunning = false;
+    board = createBoard();
+    score = lines = 0; level = 1;
+    updateHUD();
+    render();
+    oTitle.textContent   = 'TETRIS';
+    oSub.textContent     = 'Prêt à jouer ?';
+    startBtn.textContent = '▶ DÉMARRER';
+    overlay.classList.remove('hidden');
+  });
+
+  // ================================================
+  // INITIALISATION AU CHARGEMENT DE LA PAGE
+  // ================================================
+  loadBest();
+  board = createBoard();
+  render(); // Affiche la grille vide derrière l'overlay
+  </script>
+
+</body>
+</html>
